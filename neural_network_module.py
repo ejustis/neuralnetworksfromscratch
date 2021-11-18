@@ -1,11 +1,19 @@
 import numpy as np
 import nnfs
 from nnfs.datasets import spiral_data
+from timeit import default_timer as timer
+from datetime import timedelta
 
 class Layer_Dense:
-    def __init__(self, inputs, neurons) -> None: 
+    def __init__(self, inputs, neurons,
+            weight_reg_l1=0, weight_reg_l2=0,
+            bias_reg_l1=0, bias_reg_l2=0) -> None: 
         self.weights = 0.01 * np.random.randn(inputs, neurons)
         self.biases = np.zeros((1, neurons))
+        self.weight_reg_l1 = weight_reg_l1
+        self.weight_reg_l2 = weight_reg_l2
+        self.bias_reg_l1 = bias_reg_l1
+        self.bias_reg_l2 = bias_reg_l2
        
     def forward(self, inputs):
         self.inputs = inputs
@@ -14,7 +22,26 @@ class Layer_Dense:
     def backward(self, dvalues):
         self.dweights = np.dot(self.inputs.T, dvalues)
         self.dbiases = np.sum(dvalues, axis=0, keepdims=True)
+
+        # Regulization
+        if self.weight_reg_l1 > 0:
+            dl1 = np.ones_like(self.weights)
+            dl1[self.weights < 0] = -1
+            self.dweights += self.weight_reg_l1 * dl1
+        
+        if self.weight_reg_l2 > 0:
+            self.dweights += 2 * self.weight_reg_l2 * self.weights
+
+        if self.bias_reg_l1 > 0:
+            dl1 = np.ones_like(self.biases)
+            dl1[self.biases < 0] = -1
+            self.dbiases += self.bias_reg_l1 * dl1
+        
+        if self.bias_reg_l2 > 0:
+            self.dbiases += 2 * self.bias_reg_l2 * self.biases
+
         self.dinputs = np.dot(dvalues, self.weights.T)
+
 
 class Activation_ReLU:
     def forward(self, inputs):
@@ -44,6 +71,23 @@ class Loss:
         sample_losses = self.forward(output, y)
         data_loss = np.mean(sample_losses)
         return data_loss
+
+    def regularization_loss(self, layer):
+        regularization_loss = 0
+
+        if layer.weight_reg_l1 > 0:
+            regularization_loss += layer.weight_reg_l1 * np.sum(np.abs(layer.weights))
+
+        if layer.weight_reg_l2 > 0:
+            regularization_loss += layer.weight_reg_l2 * np.sum(layer.weights * layer.weights)
+
+        if layer.bias_reg_l1 > 0:
+            regularization_loss += layer.bias_reg_l1 * np.sum(np.abs(layer.biases))
+
+        if layer.bias_reg_l2 > 0:
+            regularization_loss += layer.bias_reg_l2 * np.sum(layer.biases * layer.biases)
+
+        return regularization_loss
 
 class Loss_CategoricalCrossentropy(Loss):
     def forward(self, y_pred, y_true):
@@ -216,17 +260,18 @@ def spiral_test():
     X, y = spiral_data(samples=100, classes=3)
     X_test, y_test = spiral_data(samples=100, classes=3)
 
-    dense1 = Layer_Dense(2,64)
+    dense1 = Layer_Dense(2,512, weight_reg_l2=5e-4, bias_reg_l2=5e-4)
     activation1 = Activation_ReLU()
 
-    dense2 = Layer_Dense(64, 3)
+    dense2 = Layer_Dense(512, 3)
     loss_activation = Activation_Softmax_Loss_CategoricalCrossentropy()
 
     # optimizer = Optimizer_SGD(decay=1e-3,momentum=0.92)
     # optimizer = Optimizer_AdaGrad(decay=1e-5)
     # optimizer = Optimizer_RMSprop(decay=1e-5)
-    optimizer = Optimizer_Adam(learning_rate=0.05, decay=6e-6)
+    optimizer = Optimizer_Adam(learning_rate=0.02, decay=6e-7)
 
+    training_start = timer()
     #Training loop
     for epoch in range(10001):
         dense1.forward(X)
@@ -234,7 +279,11 @@ def spiral_test():
 
         dense2.forward(activation1.output)
 
-        loss = loss_activation.forward(dense2.output, y)
+        data_loss = loss_activation.forward(dense2.output, y)
+
+        regularization_loss = loss_activation.loss.regularization_loss(dense1) +  loss_activation.loss.regularization_loss(dense2)
+
+        loss = data_loss + regularization_loss
 
         if not epoch % 1000:
             predictions = np.argmax(loss_activation.output, axis=1)
@@ -243,7 +292,9 @@ def spiral_test():
             accuracy = np.mean(predictions==y)
             print(f'epoch: {epoch} |' +
                 f'accuracy: {accuracy:.3f} |' +
-                f'loss: {loss:.3f} | ' +
+                f'loss: {loss:.3f} ' +
+                f'(data loss: {data_loss:.3f} | ' +
+                f'reg loss: {regularization_loss:.3f}) | ' +
                 f'lr: {optimizer.current_learning_rate:.6f}')
         
         #Backward pass
@@ -257,6 +308,10 @@ def spiral_test():
         optimizer.update_params(dense2)
         optimizer.post_update_params()
     
+    training_end = timer()
+
+    print(f'Training took {timedelta(seconds=training_end - training_start)}')
+
     #validate the data
     dense1.forward(X_test)
     activation1.forward(dense1.output)
