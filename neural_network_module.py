@@ -214,6 +214,7 @@ class Optimizer_Adam:
 
 def spiral_test():
     X, y = spiral_data(samples=100, classes=3)
+    X_test, y_test = spiral_data(samples=100, classes=3)
 
     dense1 = Layer_Dense(2,64)
     activation1 = Activation_ReLU()
@@ -235,7 +236,7 @@ def spiral_test():
 
         loss = loss_activation.forward(dense2.output, y)
 
-        if not epoch % 100:
+        if not epoch % 1000:
             predictions = np.argmax(loss_activation.output, axis=1)
             if len(y.shape) == 2:
                 y = np.argmax(y, axis=1)
@@ -255,5 +256,22 @@ def spiral_test():
         optimizer.update_params(dense1)
         optimizer.update_params(dense2)
         optimizer.post_update_params()
+    
+    #validate the data
+    dense1.forward(X_test)
+    activation1.forward(dense1.output)
+
+    dense2.forward(activation1.output)
+
+    loss = loss_activation.forward(dense2.output, y_test)
+
+    if not epoch % 100:
+        predictions = np.argmax(loss_activation.output, axis=1)
+        if len(y_test.shape) == 2:
+            y_test = np.argmax(y_test, axis=1)
+        accuracy = np.mean(predictions==y_test)
+        print(f'validation: ' +
+            f'accuracy: {accuracy:.3f} |' +
+            f'loss: {loss:.3f} | ')
 
 spiral_test()
